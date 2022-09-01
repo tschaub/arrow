@@ -16,7 +16,7 @@
 
 module github.com/apache/arrow/go/v10
 
-go 1.16
+go 1.17
 
 require (
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c

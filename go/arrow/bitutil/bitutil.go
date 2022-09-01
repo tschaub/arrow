@@ -152,13 +152,7 @@ const (
 func bytesToUint64(b []byte) []uint64 {
 	h := (*reflect.SliceHeader)(unsafe.Pointer(&b))
 
-	var res []uint64
-	s := (*reflect.SliceHeader)(unsafe.Pointer(&res))
-	s.Data = h.Data
-	s.Len = h.Len / uint64SizeBytes
-	s.Cap = h.Cap / uint64SizeBytes
-
-	return res
+	return unsafe.Slice((*uint64)(unsafe.Pointer(h.Data)), len(b)/uint64SizeBytes)
 }
 
 var (

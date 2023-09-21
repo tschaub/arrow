@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v14/parquet"
 	"github.com/apache/arrow/go/v14/parquet/file"
 	"github.com/apache/arrow/go/v14/parquet/metadata"
+	"github.com/apache/arrow/go/v14/parquet/schema"
 	"golang.org/x/xerrors"
 )
 
@@ -72,6 +73,10 @@ func NewFileWriter(arrschema *arrow.Schema, w io.Writer, props *parquet.WriterPr
 		return nil, err
 	}
 
+	return NewFileWriterForTesting(arrschema, pqschema, w, props, arrprops)
+}
+
+func NewFileWriterForTesting(arrschema *arrow.Schema, pqschema *schema.Schema, w io.Writer, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (*FileWriter, error) {
 	meta := make(metadata.KeyValueMetadata, 0)
 	for i := 0; i < arrschema.Metadata().Len(); i++ {
 		meta.Append(arrschema.Metadata().Keys()[i], arrschema.Metadata().Values()[i])

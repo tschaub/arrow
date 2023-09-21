@@ -17,15 +17,19 @@
 package pqarrow_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"testing"
 
 	"github.com/apache/arrow/go/v14/arrow"
+	"github.com/apache/arrow/go/v14/arrow/array"
 	"github.com/apache/arrow/go/v14/arrow/flight"
 	"github.com/apache/arrow/go/v14/arrow/ipc"
 	"github.com/apache/arrow/go/v14/arrow/memory"
 	"github.com/apache/arrow/go/v14/internal/types"
 	"github.com/apache/arrow/go/v14/parquet"
+	"github.com/apache/arrow/go/v14/parquet/file"
 	"github.com/apache/arrow/go/v14/parquet/metadata"
 	"github.com/apache/arrow/go/v14/parquet/pqarrow"
 	"github.com/apache/arrow/go/v14/parquet/schema"
@@ -133,6 +137,100 @@ func TestToParquetWriterConfig(t *testing.T) {
 			assert.Equal(t, tt.rootRepetition, pqschema.Root().RepetitionType())
 		})
 	}
+}
+
+func roundTripFloat64s(t *testing.T, parquetSchema *schema.Schema, name string, values []float64) []float64 {
+	arrowSchema := arrow.NewSchema([]arrow.Field{
+		{Name: name, Type: arrow.ListOf(arrow.PrimitiveTypes.Float64), Nullable: true},
+	}, nil)
+
+	recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer recordBuilder.Release()
+
+	fieldBuilder, ok := recordBuilder.Field(0).(*array.ListBuilder)
+	require.True(t, ok)
+
+	valuesBuilder, ok := fieldBuilder.ValueBuilder().(*array.Float64Builder)
+	require.True(t, ok)
+
+	fieldBuilder.Append(true)
+	valuesBuilder.AppendValues(values, nil)
+
+	inputRecord := recordBuilder.NewRecord()
+	defer inputRecord.Release()
+
+	parquetProps := parquet.NewWriterProperties(
+		parquet.WithRootName("root"),
+		parquet.WithRootRepetition(parquet.Repetitions.Required),
+	)
+	arrowProps := pqarrow.DefaultWriterProps()
+
+	parquetBuffer := &bytes.Buffer{}
+	fileWriter, err := pqarrow.NewFileWriterForTesting(arrowSchema, parquetSchema, parquetBuffer, parquetProps, arrowProps)
+	require.NoError(t, err)
+
+	require.NoError(t, fileWriter.Write(inputRecord))
+	require.NoError(t, fileWriter.Close())
+
+	fileReader, err := file.NewParquetReader(bytes.NewReader(parquetBuffer.Bytes()))
+	require.NoError(t, err)
+	defer fileReader.Close()
+
+	arrowReader, err := pqarrow.NewFileReader(fileReader, pqarrow.ArrowReadProperties{BatchSize: 1024}, parquetProps.Allocator())
+	require.NoError(t, err)
+
+	recordReader, err := arrowReader.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+
+	outputRecord, err := recordReader.Read()
+	require.NoError(t, err)
+
+	recordArray := array.RecordToStructArray(outputRecord)
+	defer recordArray.Release()
+
+	listArray, ok := recordArray.Field(0).(*array.List)
+	require.True(t, ok)
+
+	valuesArray, ok := listArray.ListValues().(*array.Float64)
+	require.True(t, ok)
+
+	return valuesArray.Float64Values()
+}
+
+func TestRoundTripListOfFloat64(t *testing.T) {
+	inputNumbers := []float64{10, 9, 8}
+	name := "numbers"
+
+	parquetSchema := schema.NewSchema(schema.MustGroup(
+		schema.NewGroupNode("root", parquet.Repetitions.Required, schema.FieldList{
+			schema.MustGroup(schema.ListOf(
+				schema.NewFloat64Node(name, parquet.Repetitions.Optional, -1),
+				parquet.Repetitions.Required,
+				-1,
+			)),
+		}, -1),
+	))
+
+	outputNumbers := roundTripFloat64s(t, parquetSchema, name, inputNumbers)
+	assert.Equal(t, inputNumbers, outputNumbers)
+	// this passes
+}
+
+func TestRoundTripRepeatedFloat64(t *testing.T) {
+	inputNumbers := []float64{10, 9, 8}
+	name := "numbers"
+
+	parquetSchema := schema.NewSchema(schema.MustGroup(
+		schema.NewGroupNode("root", parquet.Repetitions.Required, schema.FieldList{
+			schema.NewFloat64Node(name, parquet.Repetitions.Repeated, -1),
+		}, -1),
+	))
+
+	outputNumbers := roundTripFloat64s(t, parquetSchema, name, inputNumbers)
+	assert.Equal(t, inputNumbers, outputNumbers)
+	// this fails
+	// expected: []float64{10, 9, 8}
+	// actual  : []float64(nil)
 }
 
 func TestConvertArrowFlatPrimitives(t *testing.T) {

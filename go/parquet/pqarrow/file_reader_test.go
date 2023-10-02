@@ -45,6 +45,39 @@ func getDataDir() string {
 	return datadir
 }
 
+func TestOvertureRead(t *testing.T) {
+	reader, err := os.Open("testdata/overture.parquet")
+	require.NoError(t, err)
+
+	fileReader, err := file.NewParquetReader(reader)
+	require.NoError(t, err)
+	root := fileReader.MetaData().Schema.Root()
+	for fieldNum := 0; fieldNum < int(root.NumFields()); fieldNum += 1 {
+		fmt.Printf("field %d: %s\n", fieldNum, root.Field(fieldNum).Name())
+	}
+	geomField := root.Field(15)
+	fmt.Printf("geometry field: %#v\n", geomField)
+
+	arrowReader, err := pqarrow.NewFileReader(fileReader, pqarrow.ArrowReadProperties{BatchSize: 1}, memory.DefaultAllocator)
+	require.NoError(t, err)
+
+	recordReader, err := arrowReader.GetRecordReader(context.Background(), []int{15}, nil)
+	require.NoError(t, err)
+
+	rowsRead := int64(0)
+	for {
+		rec, err := recordReader.Read()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		rowsRead += rec.NumRows()
+		fmt.Printf("read %d\n", rowsRead)
+	}
+
+	assert.Equal(t, fileReader.NumRows(), rowsRead)
+}
+
 func TestArrowReaderAdHocReadDecimals(t *testing.T) {
 	tests := []struct {
 		file string

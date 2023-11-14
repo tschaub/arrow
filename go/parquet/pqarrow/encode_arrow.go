@@ -81,10 +81,17 @@ type ArrowColumnWriter struct {
 //
 // Using an arrow column writer is a convenience to avoid having to process the arrow array yourself
 // and determine the correct definition and repetition levels manually.
-func NewArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, col int) (ArrowColumnWriter, error) {
+//
+// The fieldIdx is the Arrow column index or the index of the corresponding field in the schema root.
+func NewArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, fieldIdx int) (ArrowColumnWriter, error) {
 	if data.Len() == 0 {
 		return ArrowColumnWriter{leafCount: calcLeafCount(data.DataType()), rgw: rgw}, nil
 	}
+
+	if fieldIdx < 0 || fieldIdx >= len(manifest.fieldColIndex) {
+		return ArrowColumnWriter{}, fmt.Errorf("invalid field index %d, there are %d fields", fieldIdx, len(manifest.fieldColIndex))
+	}
+	col := manifest.fieldColIndex[fieldIdx]
 
 	var (
 		absPos      int64

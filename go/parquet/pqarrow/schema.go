@@ -52,9 +52,10 @@ func (s *SchemaField) IsLeaf() bool { return s.ColIndex != -1 }
 // SchemaManifest represents a full manifest for mapping a Parquet schema
 // to an arrow Schema.
 type SchemaManifest struct {
-	descr        *schema.Schema
-	OriginSchema *arrow.Schema
-	SchemaMeta   *arrow.Metadata
+	fieldColIndex []int
+	descr         *schema.Schema
+	OriginSchema  *arrow.Schema
+	SchemaMeta    *arrow.Metadata
 
 	ColIndexToField map[int]*SchemaField
 	ChildToParent   map[*SchemaField]*SchemaField
@@ -1108,12 +1109,21 @@ func applyOriginalMetadata(origin arrow.Field, inferred *SchemaField) (bool, err
 // The metadata passed in should be the file level key value metadata from the parquet file or nil.
 // If the ARROW:schema was in the metadata, then it is utilized to determine types.
 func NewSchemaManifest(sc *schema.Schema, meta metadata.KeyValueMetadata, props *ArrowReadProperties) (*SchemaManifest, error) {
+	root := sc.Root()
+	numFields := root.NumFields()
+
+	fieldColIndex := make([]int, numFields)
+	for i := 0; i < numFields; i++ {
+		fieldColIndex[i] = sc.ColumnIndexByNode(root.Field(i))
+	}
+
 	var ctx schemaTree
 	ctx.manifest = &SchemaManifest{
+		fieldColIndex:   fieldColIndex,
 		ColIndexToField: make(map[int]*SchemaField),
 		ChildToParent:   make(map[*SchemaField]*SchemaField),
 		descr:           sc,
-		Fields:          make([]SchemaField, sc.Root().NumFields()),
+		Fields:          make([]SchemaField, numFields),
 	}
 	ctx.props = props
 	if ctx.props == nil {
@@ -1128,13 +1138,13 @@ func NewSchemaManifest(sc *schema.Schema, meta metadata.KeyValueMetadata, props 
 	}
 
 	// if original schema is not compatible with the parquet schema, ignore it
-	if ctx.manifest.OriginSchema != nil && len(ctx.manifest.OriginSchema.Fields()) != sc.Root().NumFields() {
+	if ctx.manifest.OriginSchema != nil && len(ctx.manifest.OriginSchema.Fields()) != numFields {
 		ctx.manifest.OriginSchema = nil
 	}
 
 	for idx := range ctx.manifest.Fields {
 		field := &ctx.manifest.Fields[idx]
-		if err := nodeToSchemaField(sc.Root().Field(idx), file.LevelInfo{NullSlotUsage: 1}, &ctx, nil, field); err != nil {
+		if err := nodeToSchemaField(root.Field(idx), file.LevelInfo{NullSlotUsage: 1}, &ctx, nil, field); err != nil {
 			return nil, err
 		}
 

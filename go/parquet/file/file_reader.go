@@ -19,6 +19,7 @@ package file
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -163,7 +164,7 @@ func (f *Reader) parseMetaData() error {
 	buf := make([]byte, footerSize)
 	// backup 8 bytes to read the footer size (first four bytes) and the magic bytes (last 4 bytes)
 	n, err := f.r.ReadAt(buf, f.footerOffset-int64(footerSize))
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("parquet: could not read footer: %w", err)
 	}
 	if n != len(buf) {
@@ -180,8 +181,12 @@ func (f *Reader) parseMetaData() error {
 	switch {
 	case bytes.Equal(buf[4:], magicBytes): // non-encrypted metadata
 		buf = make([]byte, size)
-		if _, err := f.r.ReadAt(buf, f.footerOffset-int64(footerSize)-size); err != nil {
+		n, err := f.r.ReadAt(buf, f.footerOffset-int64(footerSize)-size)
+		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
+		}
+		if n != len(buf) {
+			return fmt.Errorf("parquet: could not read %d bytes from end of file", len(buf))
 		}
 
 		f.metadata, err = metadata.NewFileMetaData(buf, nil)
@@ -200,8 +205,12 @@ func (f *Reader) parseMetaData() error {
 		}
 	case bytes.Equal(buf[4:], magicEBytes): // encrypted metadata
 		buf = make([]byte, size)
-		if _, err := f.r.ReadAt(buf, f.footerOffset-int64(footerSize)-size); err != nil {
+		n, err := f.r.ReadAt(buf, f.footerOffset-int64(footerSize)-size)
+		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
+		}
+		if n != len(buf) {
+			return fmt.Errorf("parquet: could not read %d bytes from end of file", len(buf))
 		}
 
 		if fileDecryptProps == nil {
